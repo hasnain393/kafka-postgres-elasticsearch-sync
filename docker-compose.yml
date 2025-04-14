@@ -1,0 +1,105 @@
+version: "3.9"
+
+networks:
+  bridge:
+    driver: bridge
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 32181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      bridge:
+        aliases:
+          - zookeeper
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:32181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"  # For external tools like Logstash running locally
+      - "9093:9093"  # For Docker-internal services
+    networks:
+      - bridge
+
+  postgres:
+    build:
+      context: ./postgres
+    container_name: postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    networks:
+      - bridge
+
+  kafka-producer:
+    build:
+      context: ./kafka-producer
+    container_name: kafka-producer
+    depends_on:
+      - kafka
+      - postgres
+    environment:
+      KAFKA_SERVER: "kafka:9093"
+      ZOOKEEPER_SERVER: "zookeeper:32181"
+    networks:
+      - bridge
+
+  kafka-consumer:
+    build:
+      context: ./kafka-consumer
+    container_name: kafka-consumer
+    depends_on:
+      - kafka
+      - postgres
+    environment:
+      KAFKA_SERVER: "kafka:9093"
+      ZOOKEEPER_SERVER: "zookeeper:32181"
+    networks:
+      - bridge
+
+  ui:
+    build:
+      context: ./ui
+    container_name: ui
+    restart: always
+    ports:
+      - "8501:8501"
+    environment:
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+    depends_on:
+      - postgres
+    networks:
+      - bridge
+
+  kafka-manager:
+    image: hlebalbau/kafka-manager:latest
+    container_name: kafka-manager
+    ports:
+      - "9000:9000"
+    environment:
+      ZK_HOSTS: "zookeeper:32181"
+    depends_on:
+      - kafka
+      - zookeeper
+    networks:
+      - bridge
